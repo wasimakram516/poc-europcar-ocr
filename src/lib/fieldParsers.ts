@@ -520,7 +520,6 @@ function parseChargeSlip(text: string): Fields {
     card_number:      field('Card No. (masked)',         cardNumber),
     date:             field('Date',                      date),
     reference:        field('RA Reference No.',          refs[0] ?? null),
-    sig_merchant:     sig('Signature on Sale Slip'),
   };
 }
 
