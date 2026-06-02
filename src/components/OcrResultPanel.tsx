@@ -107,7 +107,7 @@ export default function OcrResultPanel({ rawText, fields }: Props) {
   const [statuses, setStatuses] = useState<Record<string, FieldStatus>>(
     () =>
       Object.fromEntries(
-        fieldKeys.map((k) => [k, fields[k].value ? 'pending' : 'warning'])
+        fieldKeys.map((k) => [k, fields[k].value ? 'ok' : 'warning'])
       )
   );
   const [showRaw, setShowRaw] = useState(false);
@@ -120,7 +120,7 @@ export default function OcrResultPanel({ rawText, fields }: Props) {
   useEffect(() => {
     setStatuses(
       Object.fromEntries(
-        Object.keys(fields).map((k) => [k, fields[k].value ? 'pending' : 'warning'])
+        Object.keys(fields).map((k) => [k, fields[k].value ? 'ok' : 'warning'])
       )
     );
   }, [fields]);

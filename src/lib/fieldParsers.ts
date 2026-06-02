@@ -412,35 +412,115 @@ function parseVehicleChecklist(text: string): Fields {
 }
 
 // ── Charge Slip ───────────────────────────────────────────────────────────────
+//
+// A single scanned page can contain TWO slips: PRE-AUTH and SALE (in that order).
+// Key OCR quirks:
+//  • "AMOUNT: OMR" is its own line; the actual number appears 4–6 lines later
+//    (after a block of "VALID ONLY OMAN ARAB BANK…" noise lines)
+//  • "APPROVAL CODE:" is its own line; the 6-digit code appears after
+//    AID / LABEL / TVR / AC technical lines
+//  • All labels are UPPERCASE — patterns need the /i flag
+//  • "Reference number::" uses a double colon
+//
+// Expected extractions from the sample page:
+//   PRE-AUTH  262.500 OMR  approval 034686  receipt 005355  (leading 0 sometimes misread)
+//   SALE       42.000 OMR  approval 033545  receipt 005356
 
 function parseChargeSlip(text: string): Fields {
   const rows = lines(text);
+  const n = rows.length;
 
-  const transactionType =
-    firstMatch(rows, /\b(PRE-AUTH|SALE|VOID|REFUND)\b/i) ?? null;
+  // Scan forward from every match of labelPattern; for each, walk ahead up to
+  // maxLines to find the first row matching valuePattern. Returns all found values.
+  function collectAfterLabel(
+    labelPattern: RegExp,
+    valuePattern: RegExp,
+    maxLines = 14
+  ): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      if (!labelPattern.test(rows[i])) continue;
+      for (let j = i + 1; j < Math.min(i + maxLines, n); j++) {
+        const m = rows[j].match(valuePattern);
+        if (m) { out.push((m[1] ?? m[0]).trim()); break; }
+      }
+    }
+    return out;
+  }
 
-  const amount = firstMatch(rows, /[Aa][Mm][Oo][Uu][Nn][Tt][:\s]*OMR\s*([\d.]+)/) ??
-    firstMatch(rows, /OMR\s+([\d.]+)/);
+  // ── Transaction type blocks (PRE-AUTH first, SALE second) ──
+  const typeLines = rows.filter((r) => /^(PRE-AUTH|SALE|VOID|REFUND)$/.test(r.trim()));
+  const hasPreauth = typeLines.some((t) => /PRE-AUTH/i.test(t));
+  const hasSale    = typeLines.some((t) => /^SALE$/i.test(t));
 
+  // ── Amounts ──
+  // "AMOUNT: OMR\n…noise…\n262.500"  OR  "AMOUNT: OMR 262.500" (one-liner)
+  const amounts = collectAfterLabel(
+    /^AMOUNT[:\s]*OMR\s*$/i,
+    /^([\d]+[.,][\d]+)$/,
+    14
+  ).map((v) => v.replace(',', '.') + ' OMR');
+
+  // Fallback: same-line "AMOUNT: OMR 262.500"
+  if (amounts.length === 0) {
+    for (const row of rows) {
+      const m = row.match(/AMOUNT[:\s]*OMR\s+([\d.]+)/i);
+      if (m) amounts.push(m[1] + ' OMR');
+    }
+  }
+
+  // ── Approval codes ──
+  // "APPROVAL CODE:\nAID:…\nLABEL:…\nTVR:…\nAC …\n034686"
+  const approvalCodes = collectAfterLabel(
+    /^APPROVAL\s*CODE[:\s]*$/i,
+    /^(\d{5,8})$/,
+    14
+  );
+
+  // Fallback: same-line "APPROVAL CODE: 034686"
+  if (approvalCodes.length === 0) {
+    for (const row of rows) {
+      const m = row.match(/APPROVAL\s*CODE[:\s]+(\d{5,8})/i);
+      if (m) approvalCodes.push(m[1]);
+    }
+  }
+
+  // ── Receipt numbers ──
+  const receiptNos: string[] = [];
+  for (const row of rows) {
+    const m = row.match(/RECEIPT\s*No\.?[:\s]*(\d{3,8})/i);
+    if (m) receiptNos.push(m[1]);
+  }
+
+  // ── Card number (same on both slips) ──
   const cardNumber = firstMatch(rows, /(\d{4,6}\*{4,8}\d{4})/);
 
-  const approvalCode = firstMatch(rows, /[Aa]pproval\s*[Cc]ode[:\s]*(\w+)/);
-
-  const receiptNo = firstMatch(rows, /[Rr]eceipt\s*[Nn]o\.?[:\s]*(\w+)/);
-
+  // ── Date ──
   const date = firstMatch(rows, /DATE[:\s]*(\d{2}\/\d{2}\/\d{2,4})/i);
 
-  const merchantRef = firstMatch(rows, /[Rr]eference\s*(?:number)?[:\s]*(\d+)/);
+  // ── Reference numbers ──
+  // "Reference number:: 152786" (note double colon)
+  const refs: string[] = [];
+  for (const row of rows) {
+    const m = row.match(/[Rr]eference\s*number[:\s:]*(\d{5,7})/i);
+    if (m) refs.push(m[1]);
+  }
+
+  // Map extracted arrays to PRE-AUTH (index 0) / SALE (index 1) positions
+  const p = 0; // pre-auth index
+  const s = hasPreauth ? 1 : 0; // sale index
 
   return {
-    transaction_type: field('Transaction Type', transactionType),
-    amount:           field('Amount (OMR)', amount),
-    card_number:      field('Card No. (masked)', cardNumber),
-    approval_code:    field('Approval Code', approvalCode),
-    receipt_no:       field('Receipt No.', receiptNo),
-    date:             field('Date', date),
-    reference:        field('Reference No.', merchantRef),
-    sig_merchant:     sig('Signature on Merchant Copy'),
+    preauth_amount:   field('Pre-Auth Amount (OMR)',    hasPreauth ? (amounts[p] ?? null)       : null),
+    preauth_approval: field('Pre-Auth Approval Code',   hasPreauth ? (approvalCodes[p] ?? null) : null),
+    preauth_receipt:  field('Pre-Auth Receipt No.',     hasPreauth ? (receiptNos[p] ?? null)    : null),
+    sale_amount:      field('Sale Amount (OMR)',         hasSale    ? (amounts[s] ?? null)       : null),
+    sale_approval:    field('Sale Approval Code',        hasSale    ? (approvalCodes[s] ?? null) : null),
+    sale_receipt:     field('Sale Receipt No.',          hasSale    ? (receiptNos[s] ?? null)    : null),
+    card_number:      field('Card No. (masked)',         cardNumber),
+    date:             field('Date',                      date),
+    reference:        field('RA Reference No.',          refs[0] ?? null),
+    sig_merchant:     sig('Signature on Sale Slip'),
   };
 }
 
