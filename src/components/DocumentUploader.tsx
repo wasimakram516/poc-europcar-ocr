@@ -20,7 +20,8 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
-import { DocType } from '@/lib/types';
+import { DocType, SignatureEntry } from '@/lib/types';
+import { extractSignatures } from '@/lib/cropSignature';
 
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_SIZE_MB = 10;
@@ -33,11 +34,16 @@ type Stage = 'idle' | 'uploading' | 'ready' | 'running_ocr';
 interface Props {
   docType: DocType;
   onResult: (rawText: string, fields: Record<string, { label: string; value: string | null }>) => void;
+  onSignaturesExtracted: (sigs: Omit<SignatureEntry, 'id' | 'status'>[]) => void;
   onReset: () => void;
   hasResult: boolean;
+  /** Data URL injected from the booklet processor — shown as the preview image */
+  externalPreview?: string | null;
+  /** Increment this number to fully reset the uploader (clears file, preview, stage) */
+  resetToken?: number;
 }
 
-export default function DocumentUploader({ docType, onResult, onReset, hasResult }: Props) {
+export default function DocumentUploader({ docType, onResult, onSignaturesExtracted, onReset, hasResult, externalPreview, resetToken }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const panOrigin = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
@@ -56,6 +62,30 @@ export default function DocumentUploader({ docType, onResult, onReset, hasResult
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // When a booklet page image is injected externally (data URL, not a blob),
+  // transition to "ready" state so the preview is immediately visible.
+  useEffect(() => {
+    if (!externalPreview || stage !== 'idle') return;
+    setPreviewUrl(externalPreview);
+    setFile(null);
+    setStage('ready');
+    setZoom(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalPreview]);
+
+  // Parent-triggered full reset: clears file, preview, and stage.
+  // Uses functional setters so we always read the latest previewUrl before revoking.
+  useEffect(() => {
+    if (!resetToken) return;
+    setFile(null);
+    setPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setStage('idle');
+    setZoom(1);
+    setError(null);
+    setUploadProgress(0);
+    if (inputRef.current) inputRef.current.value = '';
+  }, [resetToken]);
 
   // Attach non-passive touch listeners so preventDefault() actually blocks the
   // browser's native pinch-to-zoom (React's synthetic handlers are passive by default
@@ -110,11 +140,14 @@ export default function DocumentUploader({ docType, onResult, onReset, hasResult
   }
 
   async function runOcr() {
-    if (!file) return;
+    // For booklet-injected pages, file is null but previewUrl is already a base64
+    // data URL — use that directly. For manual uploads, encode the File object.
+    const base64 = file ? await toBase64(file) : previewUrl;
+    if (!base64) return;
+
     setStage('running_ocr');
     setError(null);
     try {
-      const base64 = await toBase64(file);
       const res = await fetch('/api/v1/ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,6 +157,14 @@ export default function DocumentUploader({ docType, onResult, onReset, hasResult
       if (json.status === 'success' && json.data) {
         onResult(json.data.rawText, json.data.fields);
         setStage('ready');
+        // Extract signature crops — works for both manual uploads and booklet pages
+        const sigSource = previewUrl;
+        const sigName = file?.name ?? `booklet-${docType}`;
+        if (sigSource && file?.type !== 'application/pdf') {
+          extractSignatures(sigSource, docType, sigName)
+            .then(onSignaturesExtracted)
+            .catch(() => { /* crop failure is non-fatal */ });
+        }
       } else {
         setError(json.message ?? 'OCR failed. Please try again.');
         setStage('ready');
