@@ -43,3 +43,16 @@ export interface FieldVerification {
   status: 'ok' | 'warning' | 'pending';
   note?: string;
 }
+
+export type SignatureStatus = 'pending' | 'ok' | 'warning';
+
+export interface SignatureEntry {
+  id: string;
+  docType: DocType;
+  docLabel: string;
+  fileName: string;
+  signatureKey: string;
+  label: string;
+  imageDataUrl: string;
+  status: SignatureStatus;
+}
