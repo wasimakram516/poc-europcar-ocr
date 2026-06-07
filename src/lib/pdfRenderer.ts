@@ -52,7 +52,11 @@ export async function renderAllPages(
     results.push({
       pageNum: i,
       docType: BOOKLET_PAGE_MAP[i] ?? null,
-      dataUrl: canvas.toDataURL('image/png'),
+      // JPEG (not PNG) keeps the base64 payload well under Vercel's 4.5 MB
+      // serverless request-body limit. Dense colored scans (e.g. the pink
+      // vehicle checklist) blow past that limit as lossless PNG and the OCR
+      // request would 413 — silently dropping the page on the deployed site.
+      dataUrl: canvas.toDataURL('image/jpeg', 0.85),
     });
 
     onProgress?.(i, numPages);

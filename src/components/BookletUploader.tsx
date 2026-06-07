@@ -88,13 +88,12 @@ export default function BookletUploader({ onPageResult, onClearAll, processedDoc
     const ocrPages = renderedPages.filter((p) => p.docType !== null);
     setStage('ocr');
 
+    const failed: string[] = [];
+
     for (let i = 0; i < ocrPages.length; i++) {
       const p = ocrPages[i];
-      setProgress({
-        done: i + 1,
-        total: ocrPages.length,
-        label: `Running OCR — ${DOC_TYPE_OPTIONS.find((o) => o.value === p.docType)?.label}…`,
-      });
+      const label = DOC_TYPE_OPTIONS.find((o) => o.value === p.docType)?.label ?? String(p.docType);
+      setProgress({ done: i + 1, total: ocrPages.length, label: `Running OCR — ${label}…` });
 
       try {
         const res = await fetch('/api/v1/ocr', {
@@ -102,6 +101,11 @@ export default function BookletUploader({ onPageResult, onClearAll, processedDoc
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base64: p.dataUrl, docType: p.docType }),
         });
+        if (!res.ok) {
+          // 413 (payload too large) or 5xx — record and continue
+          failed.push(label);
+          continue;
+        }
         const json = await res.json();
         if (json.status === 'success' && json.data) {
           onPageResult({
@@ -110,14 +114,19 @@ export default function BookletUploader({ onPageResult, onClearAll, processedDoc
             rawText: json.data.rawText,
             fields: json.data.fields,
           });
+        } else {
+          failed.push(label);
         }
       } catch {
-        // Non-fatal: skip this page
+        failed.push(label);
       }
     }
 
     setStage('done');
     setProgress({ done: ocrPages.length, total: ocrPages.length, label: 'Complete' });
+    if (failed.length) {
+      setError(`OCR failed for: ${failed.join(', ')}. Try uploading ${failed.length > 1 ? 'those pages' : 'that page'} individually.`);
+    }
   }
 
   function clearAll() {
