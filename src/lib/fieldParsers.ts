@@ -24,12 +24,6 @@ function field(label: string, value: string | null): ExtractedField {
   return { label, value };
 }
 
-// Signature fields cannot be detected by OCR — they are always null and start
-// as "Flagged" so the auditor must visually confirm and click to verify.
-function sig(label: string): ExtractedField {
-  return { label: `${label} (visual check)`, value: null };
-}
-
 // ── Rental Agreement ──────────────────────────────────────────────────────────
 //
 // OCR structure (Google Vision reads this bilingual 2-column form in reading order):
@@ -209,8 +203,6 @@ function parseRentalAgreement(text: string): Fields {
     total_amount: field('Total Amount', totalAmount),
     deductible: field('CDW Deductible', deductible),
     payment_amount: field('Payment Amount', paymentAmount),
-    sig_customer: sig('Customer Signature'),
-    sig_staff: sig('Staff Signature (Europcar)'),
   };
 }
 
@@ -281,8 +273,6 @@ function parseDriverDetails(text: string): Fields {
     hotel_name: field('Hotel / Oman Address', hotel),
     email: field('Email Address', email),
     mobile: field('Mobile No.', mobile),
-    sig_renter: sig('Renter Signature'),
-    sig_staff: sig('Staff Signature'),
   };
 }
 
@@ -406,8 +396,6 @@ function parseVehicleChecklist(text: string): Fields {
     fuel_in:       field('Fuel at Check-in', fuelIn),
     date_out:      field('Date / Time Check-out', dateOut),
     date_in:       field('Date / Time Check-in', dateIn),
-    sig_customer:  sig('Customer Signature (Check-out)'),
-    sig_renter_in: sig('Renter Signature (Check-in)'),
   };
 }
 

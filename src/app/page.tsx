@@ -26,10 +26,12 @@ import ChecklistIcon from '@mui/icons-material/Checklist';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import GestureIcon from '@mui/icons-material/Gesture';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
+import FileDownloadIcon from '@mui/icons-material/FileDownloadOutlined';
 import DocumentUploader from '@/components/DocumentUploader';
 import OcrResultPanel from '@/components/OcrResultPanel';
 import SignaturePanel from '@/components/SignaturePanel';
 import BookletUploader, { BookletPageResult } from '@/components/BookletUploader';
+import { exportReport } from '@/lib/exportReport';
 import { DocType, SignatureEntry, SignatureStatus, ExtractedField } from '@/lib/types';
 import { DOC_TYPE_OPTIONS } from '@/lib/fieldParsers';
 import { extractSignatures } from '@/lib/cropSignature';
@@ -145,6 +147,11 @@ export default function Home() {
     setRightView('fields');
   }
 
+  function handleExportReport() {
+    if (processedDocTypes.length === 0) return;
+    exportReport(docResults, 'europcar-ocr-report');
+  }
+
   const pendingSigs = signatures.filter((s) => s.status === 'pending').length;
   const flaggedSigs = signatures.filter((s) => s.status === 'warning').length;
   const sigBadge = flaggedSigs > 0 ? flaggedSigs : pendingSigs;
@@ -165,6 +172,27 @@ export default function Home() {
                 Document Verification — Oman
               </Typography>
             </Box>
+            <Box sx={{ flex: 1 }} />
+            <Tooltip
+              title={
+                processedDocTypes.length === 0
+                  ? 'Run OCR on at least one document to enable export'
+                  : 'Export all extracted fields to an Excel workbook (one sheet per document)'
+              }
+            >
+              <span>
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<FileDownloadIcon />}
+                  onClick={handleExportReport}
+                  disabled={processedDocTypes.length === 0}
+                  sx={{ bgcolor: 'white', color: 'primary.main', '&:hover': { bgcolor: 'grey.100' } }}
+                >
+                  Export Report
+                </Button>
+              </span>
+            </Tooltip>
           </Stack>
         </Container>
       </Box>
